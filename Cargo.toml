@@ -1,0 +1,11 @@
+[package]
+name = "evilgram"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+mongodb = "3.3"
+teloxide = "0.17"
+anyhow = "1"
