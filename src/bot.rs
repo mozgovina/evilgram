@@ -8,7 +8,6 @@ use teloxide::{
 };
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
-type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Default)]
 pub enum State {
@@ -49,7 +48,12 @@ pub async fn run_bot(token: String) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn start_branch(bot: Bot, dialogue: MyDialogue, msg: Message, cmd: Command) -> HandlerResult {
+async fn start_branch(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    cmd: Command,
+) -> anyhow::Result<()> {
     match cmd {
         Command::Start => bot.send_message(msg.chat.id, "Starting Message").await?,
         _ => bot.send_message(msg.chat.id, "Hello").await?,
@@ -57,12 +61,12 @@ async fn start_branch(bot: Bot, dialogue: MyDialogue, msg: Message, cmd: Command
     Ok(())
 }
 
-async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message) -> anyhow::Result<()> {
     bot.send_message(msg.chat.id, "Hello").await?;
     Ok(())
 }
 
-async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message) -> anyhow::Result<()> {
     bot.send_message(msg.chat.id, "Hello").await?;
     Ok(())
 }
