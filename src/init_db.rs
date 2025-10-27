@@ -2,13 +2,14 @@ use crate::structs::{DBBot, DBUser};
 use anyhow;
 use mongodb::{Client, Collection, Database, bson::doc};
 
-pub struct InitDB {
+#[derive(Clone)]
+pub struct DB {
     pub database: Database,
     pub users_coll: Collection<DBUser>,
     pub bots_coll: Collection<DBBot>,
 }
 
-pub async fn init_db() -> anyhow::Result<InitDB> {
+pub async fn init_db() -> anyhow::Result<DB> {
     // Enviroment variables
     let uri = std::env::var("MONGODB_URI")?;
     let db_name = std::env::var("DATABASE")?;
@@ -74,7 +75,7 @@ pub async fn init_db() -> anyhow::Result<InitDB> {
         }
     }
 
-    Ok(InitDB {
+    Ok(DB {
         database: database,
         users_coll: users_coll,
         bots_coll: bots_coll,

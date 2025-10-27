@@ -7,6 +7,8 @@ use teloxide::{
     utils::command::BotCommands,
 };
 
+use crate::init_db::DB;
+
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 
 #[derive(Clone, Default)]
@@ -25,7 +27,7 @@ enum Command {
     Notify,
 }
 
-pub async fn run_bot(token: String) -> anyhow::Result<()> {
+pub async fn run_bot(token: String, db: DB) -> anyhow::Result<()> {
     let bot = Bot::new(token);
 
     Dispatcher::builder(
@@ -40,7 +42,7 @@ pub async fn run_bot(token: String) -> anyhow::Result<()> {
             .branch(dptree::case![State::CreateMirror].endpoint(create_mirror))
             .branch(dptree::case![State::BroadcastMessage].endpoint(broadcast_msg)),
     )
-    .dependencies(dptree::deps![InMemStorage::<State>::new()])
+    .dependencies(dptree::deps![InMemStorage::<State>::new(), db])
     .build()
     .dispatch()
     .await;
@@ -53,6 +55,7 @@ async fn start_branch(
     dialogue: MyDialogue,
     msg: Message,
     cmd: Command,
+    db: DB,
 ) -> anyhow::Result<()> {
     match cmd {
         Command::Start => bot.send_message(msg.chat.id, "Starting Message").await?,
@@ -61,12 +64,12 @@ async fn start_branch(
     Ok(())
 }
 
-async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message) -> anyhow::Result<()> {
+async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> anyhow::Result<()> {
     bot.send_message(msg.chat.id, "Hello").await?;
     Ok(())
 }
 
-async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message) -> anyhow::Result<()> {
+async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> anyhow::Result<()> {
     bot.send_message(msg.chat.id, "Hello").await?;
     Ok(())
 }

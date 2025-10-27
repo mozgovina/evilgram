@@ -1,5 +1,6 @@
 use anyhow;
 use mongodb::bson::doc;
+use teloxide::{Bot, prelude::Requester};
 use tokio;
 
 pub mod bot;
@@ -12,16 +13,30 @@ use futures::stream::TryStreamExt;
 async fn main() -> anyhow::Result<()> {
     let db = init_db().await?;
 
-    let bots_cursor = db.bots_coll.find(doc! {}).await?;
+    let bots_cursor = db.bots_coll.find(doc! {"is_active": true}).await?;
     let bots: Vec<DBBot> = bots_cursor.try_collect().await?;
 
     for bot in bots.into_iter() {
-        tokio::spawn(async {
-            match run_bot(bot.token).await {
-                Err(e) => eprintln!("{}", e),
-                _ => {}
+        let db = db.clone();
+        match Bot::new(&bot.token).get_me().await {
+            Ok(_) => {
+                tokio::spawn(async {
+                    match run_bot(bot.token, db).await {
+                        Err(e) => eprintln!("{}", e),
+                        _ => {}
+                    }
+                });
             }
-        });
+            Err(e) => {
+                eprintln!("Error while starting bot: {}", e);
+                db.bots_coll
+                    .update_one(
+                        doc! {"token": bot.token},
+                        doc! {"$set": doc! {"is_active": false}},
+                    )
+                    .await?;
+            }
+        }
     }
 
     tokio::signal::ctrl_c().await?;
