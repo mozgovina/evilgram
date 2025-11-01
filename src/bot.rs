@@ -1,17 +1,21 @@
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
-use futures::{FutureExt, future::BoxFuture};
+use futures::{FutureExt, StreamExt, future::BoxFuture};
 use mongodb::bson::{Decimal128, doc};
 use teloxide::{
     Bot,
     dispatching::{HandlerExt, dialogue::InMemStorage},
     dptree,
+    payloads::SendMessageSetters,
     prelude::*,
     types::Message,
     utils::command::BotCommands,
 };
 
-use crate::{init_db::DB, structs::DBBot};
+use crate::{
+    init_db::DB,
+    structs::{DBBot, DBUser},
+};
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 
@@ -74,27 +78,67 @@ async fn start_branch(
     db: DB,
 ) -> anyhow::Result<()> {
     match cmd {
-        Command::Start => bot.send_message(msg.chat.id, "Starting Message").await?,
+        Command::Start => {
+            start_command(bot, msg, db).await?;
+        }
         _ => {
             let user_id = msg.chat.id;
             if is_admin(&db, user_id).await? {
                 match cmd {
                     Command::CreateMirror => {
                         dialogue.update(State::CreateMirror).await?;
-                        bot.send_message(msg.chat.id, "Type token").await?
+                        bot.send_message(msg.chat.id, "Type token").await?;
                     }
                     Command::Notify => {
                         dialogue.update(State::Notify).await?;
                         bot.send_message(msg.chat.id, "Type message you want to send to users")
-                            .await?
+                            .await?;
                     }
-                    _ => bot.send_message(msg.chat.id, "Unknown command").await?,
+                    _ => {
+                        bot.send_message(msg.chat.id, "Unknown command").await?;
+                    }
                 }
             } else {
-                bot.send_message(msg.chat.id, "You are not admin").await?
-            }
+                bot.send_message(msg.chat.id, "You are not admin").await?;
+            };
         }
     };
+    Ok(())
+}
+
+async fn start_command(bot: Bot, msg: Message, db: DB) -> anyhow::Result<()> {
+    let user_id = msg.from.ok_or(anyhow::anyhow!("No sender"))?.id.0;
+    let filter = doc! {"user_id": Decimal128::from_str(user_id.to_string().as_str())?};
+    let user = db.users_coll.find_one(filter.clone()).await?;
+    match user {
+        None => {
+            db.users_coll
+                .insert_one(DBUser {
+                    user_id: user_id,
+                    role: "default".to_string(),
+                    active_in: vec![bot.token().to_string()],
+                    created_mirrors: Vec::new(),
+                    is_active: true,
+                })
+                .await?;
+        }
+        Some(user) => {
+            if !user.is_active {
+                db.users_coll
+                    .update_one(filter.clone(), doc! {"is_active": true})
+                    .await?;
+            }
+            if !user.active_in.contains(&bot.token().to_string()) {
+                db.users_coll
+                    .update_one(
+                        filter.clone(),
+                        doc! {"$push": doc! {"active_in": &bot.token().to_string()}},
+                    )
+                    .await?;
+            }
+        }
+    }
+    bot.send_message(msg.chat.id, "Starting Message").await?;
     Ok(())
 }
 
@@ -130,8 +174,63 @@ async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> 
 }
 
 async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> anyhow::Result<()> {
-    bot.send_message(msg.chat.id, "Notify is not implemented")
-        .await?;
+    let mut cursor = db.users_coll.find(doc! {}).await?;
+
+    let mut bot_stats: HashMap<String, u32> = HashMap::new();
+
+    while let Some(user) = cursor.next().await {
+        match user {
+            Ok(user) => {
+                for token in user.active_in {
+                    bot_stats.insert(token.clone(), 0);
+
+                    let bot = Bot::new(token.clone());
+                    let send = bot.send_message(
+                        user.user_id.to_string(),
+                        msg.text().ok_or(anyhow::anyhow!("No text to send"))?,
+                    );
+                    let res = if let Some(entities) = msg.entities() {
+                        send.entities(entities.to_vec()).await
+                    } else {
+                        send.await
+                    };
+
+                    match res {
+                        Err(e) => {
+                            eprintln!("Error: {}", e);
+                        }
+                        Ok(_) => match bot_stats.get(&token) {
+                            Some(i) => {
+                                bot_stats.insert(token, i + 1);
+                            }
+                            None => {
+                                bot_stats.insert(token, 1);
+                            }
+                        },
+                    }
+                }
+            }
+            Err(e) => eprintln!("Error: {}", e),
+        }
+    }
+
+    bot.send_message(msg.chat.id, "Sending completed").await?;
     dialogue.reset().await?;
+
+    for (token, sent) in bot_stats {
+        if sent == 0 {
+            db.bots_coll
+                .update_one(
+                    doc! {"token": token},
+                    doc! {
+                        "$set": doc! {
+                            "is_active": false
+                        }
+                    },
+                )
+                .await?;
+        }
+    }
+
     Ok(())
 }
