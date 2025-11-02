@@ -33,6 +33,7 @@ enum Command {
     Start,
     CreateMirror,
     Notify,
+    AddAdmin(u64),
 }
 
 async fn is_admin(db: &DB, user_id: ChatId) -> anyhow::Result<bool> {
@@ -82,8 +83,7 @@ async fn start_branch(
             start_command(bot, msg, db).await?;
         }
         _ => {
-            let user_id = msg.chat.id;
-            if is_admin(&db, user_id).await? {
+            if is_admin(&db, msg.chat.id).await? {
                 match cmd {
                     Command::CreateMirror => {
                         dialogue.update(State::CreateMirror).await?;
@@ -93,6 +93,28 @@ async fn start_branch(
                         dialogue.update(State::Notify).await?;
                         bot.send_message(msg.chat.id, "Type message you want to send to users")
                             .await?;
+                    }
+                    Command::AddAdmin(user_id) => {
+                        let filter =
+                            doc! {"user_id": Decimal128::from_str(user_id.to_string().as_str())?};
+                        if let Some(user) = db.users_coll.find_one(filter.clone()).await? {
+                            if user.role == "admin" {
+                                bot.send_message(msg.chat.id, "This user is already an admin")
+                                    .await?;
+                            } else {
+                                db.users_coll
+                                    .update_one(
+                                        filter,
+                                        doc! {
+                                            "$set": doc! {"role": "admin"}
+                                        },
+                                    )
+                                    .await?;
+                            }
+                        } else {
+                            bot.send_message(msg.chat.id, "No such user in database")
+                                .await?;
+                        }
                     }
                     _ => {
                         bot.send_message(msg.chat.id, "Unknown command").await?;
