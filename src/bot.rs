@@ -2,6 +2,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use futures::{FutureExt, StreamExt, future::BoxFuture};
 use mongodb::bson::{Decimal128, doc};
+use regex::Regex;
 use teloxide::{
     Bot,
     dispatching::{HandlerExt, dialogue::InMemStorage},
@@ -168,7 +169,11 @@ async fn create_mirror(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> 
     match msg.text() {
         Some(token) => {
             let token = token.to_string();
-            // TODO: add token validation
+            let re = Regex::new(r"^\d{9,10}:[a-zA-Z0-9_-]{35}$").unwrap();
+            if !re.is_match(&token) {
+                bot.send_message(msg.chat.id, "Invalid token").await?;
+                return Ok(());
+            }
 
             if Bot::new(&token).get_me().await.is_ok() {
                 let creater_id = msg.from.ok_or(anyhow::anyhow!("No sender"))?.id.0;
