@@ -12,6 +12,7 @@ use teloxide::{
     types::Message,
     utils::command::BotCommands,
 };
+use tokio::task::JoinSet;
 
 use crate::{
     init_db::DB,
@@ -204,6 +205,10 @@ async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> 
     let mut cursor = db.users_coll.find(doc! {}).await?;
 
     let mut bot_stats: HashMap<String, u32> = HashMap::new();
+    let mut set = JoinSet::new();
+    if msg.text().is_none() {
+        return Err(anyhow::anyhow!("No text to send!"));
+    }
 
     while let Some(user) = cursor.next().await {
         match user {
@@ -211,32 +216,39 @@ async fn broadcast_msg(bot: Bot, dialogue: MyDialogue, msg: Message, db: DB) -> 
                 for token in user.active_in {
                     bot_stats.insert(token.clone(), 0);
 
-                    let bot = Bot::new(token.clone());
-                    let send = bot.send_message(
-                        user.user_id.to_string(),
-                        msg.text().ok_or(anyhow::anyhow!("No text to send"))?,
-                    );
-                    let res = if let Some(entities) = msg.entities() {
-                        send.entities(entities.to_vec()).await
-                    } else {
-                        send.await
-                    };
+                    let msg = msg.clone();
 
-                    match res {
-                        Err(e) => {
-                            eprintln!("Error: {}", e);
-                        }
-                        Ok(_) => match bot_stats.get(&token) {
-                            Some(i) => {
-                                bot_stats.insert(token, i + 1);
-                            }
-                            None => {
-                                bot_stats.insert(token, 1);
-                            }
-                        },
-                    }
+                    set.spawn(async move {
+                        let bot = Bot::new(token.clone());
+                        let send = bot.send_message(user.user_id.to_string(), msg.text().unwrap());
+                        let res = if let Some(entities) = msg.entities() {
+                            send.entities(entities.to_vec()).await
+                        } else {
+                            send.await
+                        };
+                        (res, token)
+                    });
                 }
             }
+            Err(e) => eprintln!("Error: {}", e),
+        }
+    }
+
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok((res, token)) => match res {
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                }
+                Ok(_) => match bot_stats.get(&token) {
+                    Some(i) => {
+                        bot_stats.insert(token, i + 1);
+                    }
+                    None => {
+                        bot_stats.insert(token, 1);
+                    }
+                },
+            },
             Err(e) => eprintln!("Error: {}", e),
         }
     }
