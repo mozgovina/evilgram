@@ -42,7 +42,7 @@ export DATABASE="evilgram"            # Your pre-created database name
 
 ### Run
 ```bash
-cargo run
+cargo run --release
 ```
 
 ## Admin Commands
